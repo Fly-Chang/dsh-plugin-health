@@ -132,7 +132,8 @@ export function collectHealth(ctx: Context): HealthSnapshot {
   const issues: string[] = []
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   const profileScope = join(home, 'profiles', 'web', 'node_modules', '@linxin666')
-  const packagesRoot = resolve(packageRoot(), '..')
+  const dshWebUiRoot = resolve(packageRoot(), '..', 'dsh-web-ui')
+  const packagesRoot = join(dshWebUiRoot, 'packages')
 
   const linkChecks = [
     { name: '@linxin666/dsh-pet', expected: join(packagesRoot, 'dsh-pet') },
