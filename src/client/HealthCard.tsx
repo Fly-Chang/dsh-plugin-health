@@ -2,8 +2,8 @@
  * Health report card for dsh-plugin-health. A fixed entry button plus a
  * frosted-glass overlay that portals to document.body.
  */
-import { useState } from 'react'
-import type { ReactElement } from 'react'
+import { useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
 interface HostEntry {
@@ -53,17 +53,19 @@ export interface HealthSnapshot {
 export const HEALTH_CSS = `
 .dsh-ph-entry {
   position: fixed;
-  top: 84px;
-  right: 16px;
   z-index: 2147482000;
   border: 1px solid var(--dsw-alias-border-l1, rgba(121,126,145,.2));
   border-radius: 10px;
   padding: 6px 10px;
   font: inherit;
   font-size: 12px;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   color: var(--dsw-alias-label-secondary, #686c75);
   background: var(--dsw-alias-bg-layer-2, rgba(255,255,255,.72));
+}
+.dsh-ph-entry:active {
+  cursor: grabbing;
 }
 .dsh-ph-entry:hover {
   color: var(--dsw-alias-label-primary, #15171b);
@@ -199,12 +201,68 @@ function fmt(text: string, params: Record<string, unknown>): string {
   return out
 }
 
+interface EntryPosition {
+  left: number
+  top: number
+}
+
+const POSITION_KEY = 'dsh-plugin-health.position'
+
+function readPosition(): EntryPosition {
+  const fallback: EntryPosition = { left: 16, top: 84 }
+  try {
+    const raw = window.localStorage.getItem(POSITION_KEY)
+    if (raw === null) return fallback
+    const parsed = JSON.parse(raw) as Partial<EntryPosition>
+    if (typeof parsed.left !== 'number' || typeof parsed.top !== 'number') return fallback
+    return clampPosition({ left: parsed.left, top: parsed.top })
+  } catch {
+    return fallback
+  }
+}
+
+function clampPosition(position: EntryPosition): EntryPosition {
+  const width = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const height = typeof window === 'undefined' ? 720 : window.innerHeight
+  return {
+    left: Math.max(0, Math.min(position.left, Math.max(0, width - 120))),
+    top: Math.max(0, Math.min(position.top, Math.max(0, height - 40))),
+  }
+}
+
 export function HealthCard(): ReactElement {
   const t = dictionary()
   const [snapshot, setSnapshot] = useState<HealthSnapshot | null>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [position, setPosition] = useState<EntryPosition>(readPosition)
+  const dragRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null)
+  const movedRef = useRef(false)
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    dragRef.current = { startX: event.clientX, startY: event.clientY, left: position.left, top: position.top }
+    movedRef.current = false
+  }
+  const onPointerMove = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    const drag = dragRef.current
+    if (drag === null) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) movedRef.current = true
+    setPosition(clampPosition({ left: drag.left + dx, top: drag.top + dy }))
+  }
+  const onPointerUp = (): void => {
+    if (dragRef.current === null) return
+    dragRef.current = null
+    try {
+      window.localStorage.setItem(POSITION_KEY, JSON.stringify(position))
+    } catch {
+      // Position persistence is best-effort.
+    }
+  }
 
   const run = (): void => {
     setLoading(true)
@@ -315,7 +373,18 @@ export function HealthCard(): ReactElement {
 
   return (
     <>
-      <button type="button" className="dsh-ph-entry" onClick={run}>
+      <button
+        type="button"
+        className="dsh-ph-entry"
+        style={{ left: position.left, top: position.top }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={() => {
+          if (movedRef.current) return
+          run()
+        }}
+      >
         {loading ? t.loading : t.open}
       </button>
       {open ? createPortal(card, document.body) : null}
